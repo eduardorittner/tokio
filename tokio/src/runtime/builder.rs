@@ -257,11 +257,27 @@ fn sharded_blocking_queue_default() -> bool {
     }
 }
 
+/// The default flavor of [`Builder::new_multi_thread`]: the signal-tree
+/// scheduler iff the `TOKIO_UNSTABLE_SIGNAL_SCHEDULER` environment variable is
+/// set to a value other than `0`.
+///
+/// The variable runs the whole test suite against the new flavor with no test
+/// change.
+#[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+fn signal_scheduler_default() -> bool {
+    match std::env::var_os("TOKIO_UNSTABLE_SIGNAL_SCHEDULER") {
+        Some(value) => !value.is_empty() && value != "0",
+        None => false,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum Kind {
     CurrentThread,
     #[cfg(feature = "rt-multi-thread")]
     MultiThread,
+    #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+    MultiThreadSignal,
 }
 
 impl Builder {
@@ -292,7 +308,59 @@ impl Builder {
     #[cfg_attr(docsrs, doc(cfg(feature = "rt-multi-thread")))]
     pub fn new_multi_thread() -> Builder {
         // The number `61` is fairly arbitrary. I believe this value was copied from golang.
+        #[cfg(tokio_unstable)]
+        if signal_scheduler_default() {
+            return Builder::new(Kind::MultiThreadSignal, 61);
+        }
+
         Builder::new(Kind::MultiThread, 61)
+    }
+
+    cfg_unstable! {
+        /// Returns a new builder with the signal-tree multi thread scheduler
+        /// selected.
+        ///
+        /// The flavor keeps the local run queues, the LIFO slot, the injection
+        /// queue and the work stealing of [`new_multi_thread`]. It replaces the
+        /// idle-worker logic with a *signal tree*: a tree of atomic words that
+        /// records which work source holds work and which worker sleeps. A
+        /// worker that looks for work reads the tree and steals from one named
+        /// source. It does not probe its peers.
+        ///
+        /// # Not production ready
+        ///
+        /// This scheduler is an experiment. Do **not** use it in production.
+        /// Its performance is not yet proven, and its behaviour can change or
+        /// be removed in any release.
+        ///
+        /// # Target support
+        ///
+        /// The tree is an array of 64-bit atomic words on every target. A
+        /// target with no 64-bit atomic instruction (most 32-bit targets) runs
+        /// the scheduler correctly, but each word goes through a mutex, so the
+        /// scheduler is slow there.
+        ///
+        /// [`new_multi_thread`]: Builder::new_multi_thread
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use tokio::runtime::Builder;
+        ///
+        /// let rt = Builder::new_multi_thread_signal()
+        ///     .worker_threads(4)
+        ///     .build()
+        ///     .unwrap();
+        ///
+        /// rt.block_on(async {
+        ///     println!("Hello from the signal-tree runtime");
+        /// });
+        /// ```
+        #[cfg(feature = "rt-multi-thread")]
+        #[cfg_attr(docsrs, doc(cfg(feature = "rt-multi-thread")))]
+        pub fn new_multi_thread_signal() -> Builder {
+            Builder::new(Kind::MultiThreadSignal, 61)
+        }
     }
 
     /// Returns a new runtime builder initialized with default configuration
@@ -1148,6 +1216,8 @@ impl Builder {
             Kind::CurrentThread => self.build_current_thread_runtime(),
             #[cfg(feature = "rt-multi-thread")]
             Kind::MultiThread => self.build_threaded_runtime(),
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            Kind::MultiThreadSignal => self.build_signal_threaded_runtime(),
         }
     }
 
@@ -1184,6 +1254,10 @@ impl Builder {
             Kind::CurrentThread => self.build_current_thread_local_runtime(),
             #[cfg(feature = "rt-multi-thread")]
             Kind::MultiThread => panic!("multi_thread is not supported for LocalRuntime"),
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            Kind::MultiThreadSignal => {
+                panic!("multi_thread_signal is not supported for LocalRuntime")
+            }
         }
     }
 
@@ -1193,6 +1267,8 @@ impl Builder {
                 Kind::CurrentThread => true,
                 #[cfg(feature = "rt-multi-thread")]
                 Kind::MultiThread => false,
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Kind::MultiThreadSignal => false,
             },
             enable_io: self.enable_io,
             enable_time: self.enable_time,
@@ -2232,6 +2308,61 @@ cfg_rt_multi_thread! {
             launch.launch();
 
             Ok(Runtime::from_parts(Scheduler::MultiThread(scheduler), handle, blocking_pool))
+        }
+
+        #[cfg(tokio_unstable)]
+        fn build_signal_threaded_runtime(&mut self) -> io::Result<Runtime> {
+            use crate::loom::sys::num_cpus;
+            use crate::runtime::{Config, runtime::Scheduler};
+            use crate::runtime::scheduler::{self, MultiThreadSignal};
+
+            let worker_threads = self.worker_threads.unwrap_or_else(num_cpus);
+
+            let (driver, driver_handle) = driver::Driver::new(self.get_cfg())?;
+
+            // Create the blocking pool
+            let blocking_pool =
+                blocking::create_blocking_pool(self, self.max_blocking_threads + worker_threads, worker_threads);
+            let blocking_spawner = blocking_pool.spawner().clone();
+
+            // Generate a rng seed for this runtime.
+            let seed_generator_1 = self.seed_generator.next_generator();
+            let seed_generator_2 = self.seed_generator.next_generator();
+
+            let (scheduler, handle, launch) = MultiThreadSignal::new(
+                worker_threads,
+                driver,
+                driver_handle,
+                blocking_spawner,
+                seed_generator_2,
+                Config {
+                    before_park: self.before_park.clone(),
+                    after_unpark: self.after_unpark.clone(),
+                    before_spawn: self.before_spawn.clone(),
+                    before_poll: self.before_poll.clone(),
+                    after_poll: self.after_poll.clone(),
+                    after_termination: self.after_termination.clone(),
+                    global_queue_interval: self.global_queue_interval,
+                    event_interval: self.event_interval,
+                    unhandled_panic: self.unhandled_panic.clone(),
+                    disable_lifo_slot: self.disable_lifo_slot,
+                    enable_eager_driver_handoff: self.enable_eager_driver_handoff,
+                    seed_generator: seed_generator_1,
+                    metrics_poll_count_histogram: self.metrics_poll_count_histogram_builder(),
+                    track_task_schedule_latency: self.track_task_schedule_latency,
+                    metrics_schedule_latency_histogram: self.metrics_schedule_latency_histogram_builder(),
+                },
+                self.timer_flavor,
+                self.name.clone(),
+            );
+
+            let handle = Handle { inner: scheduler::Handle::MultiThreadSignal(handle) };
+
+            // Spawn the thread pool workers
+            let _enter = handle.enter();
+            launch.launch();
+
+            Ok(Runtime::from_parts(Scheduler::MultiThreadSignal(scheduler), handle, blocking_pool))
         }
     }
 }

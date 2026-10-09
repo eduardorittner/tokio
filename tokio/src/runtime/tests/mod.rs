@@ -66,6 +66,8 @@ cfg_loom! {
     mod loom_join_set;
     mod loom_local;
     mod loom_multi_thread;
+    #[cfg(tokio_unstable)]
+    mod loom_multi_thread_signal;
     mod loom_oneshot;
 
     // Make sure debug assertions are enabled

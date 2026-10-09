@@ -59,4 +59,4 @@ mod imp {
 #[derive(Debug)]
 pub(crate) struct Counters;
 
-pub(super) use imp::*;
+pub(crate) use imp::*;

@@ -85,6 +85,12 @@ where
                 (Handle::MultiThread(sched_hdl), Handle::MultiThread(cur_sched_hdl)) => {
                     Arc::as_ptr(sched_hdl) == Arc::as_ptr(cur_sched_hdl)
                 }
+                (
+                    Handle::MultiThreadSignal(sched_hdl),
+                    Handle::MultiThreadSignal(cur_sched_hdl),
+                ) => Arc::as_ptr(sched_hdl) == Arc::as_ptr(cur_sched_hdl),
+                (Handle::MultiThread(_), Handle::MultiThreadSignal(_))
+                | (Handle::MultiThreadSignal(_), Handle::MultiThread(_)) => false,
             }
         })
         .unwrap_or_default();
@@ -99,6 +105,9 @@ where
         // The timer is being registered from the same runtime that the timer is created in,
         // so we can access `TempLocalContext`.
         context::with_scheduler(|maybe_cx| match maybe_cx {
+            Some(cx @ scheduler::Context::MultiThreadSignal(_)) => cx
+                .expect_multi_thread_signal()
+                .with_time_temp_local_context(f),
             Some(cx) => cx.expect_multi_thread().with_time_temp_local_context(f),
             None => f(None),
         })

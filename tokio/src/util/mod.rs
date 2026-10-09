@@ -81,6 +81,10 @@ cfg_rt! {
 cfg_rt_multi_thread! {
     mod try_lock;
     pub(crate) use try_lock::TryLock;
+
+    // The signal tree only backs the unstable `multi_thread_signal` flavor.
+    #[cfg(tokio_unstable)]
+    pub(crate) mod signal_tree;
 }
 
 pub(crate) mod trace;

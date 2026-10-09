@@ -19,6 +19,11 @@ cfg_rt_multi_thread! {
 
     pub(crate) mod multi_thread;
     pub(crate) use multi_thread::MultiThread;
+
+    #[cfg(tokio_unstable)]
+    pub(crate) mod multi_thread_signal;
+    #[cfg(tokio_unstable)]
+    pub(crate) use multi_thread_signal::MultiThreadSignal;
 }
 
 pub(super) mod util;
@@ -33,6 +38,9 @@ pub(crate) enum Handle {
     #[cfg(feature = "rt-multi-thread")]
     MultiThread(Arc<multi_thread::Handle>),
 
+    #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+    MultiThreadSignal(Arc<multi_thread_signal::Handle>),
+
     // TODO: This is to avoid triggering "dead code" warnings many other places
     // in the codebase. Remove this during a later cleanup
     #[cfg(not(feature = "rt"))]
@@ -46,6 +54,9 @@ pub(super) enum Context {
 
     #[cfg(feature = "rt-multi-thread")]
     MultiThread(multi_thread::Context),
+
+    #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+    MultiThreadSignal(multi_thread_signal::Context),
 }
 
 impl Handle {
@@ -57,6 +68,9 @@ impl Handle {
 
             #[cfg(feature = "rt-multi-thread")]
             Handle::MultiThread(ref h) => &h.driver,
+
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            Handle::MultiThreadSignal(ref h) => &h.driver,
 
             #[cfg(not(feature = "rt"))]
             Handle::Disabled => unreachable!(),
@@ -80,6 +94,9 @@ cfg_rt! {
 
                 #[cfg(feature = "rt-multi-thread")]
                 $ty::MultiThread($h) => $e,
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                $ty::MultiThreadSignal($h) => $e,
             }
         }
     }
@@ -103,6 +120,9 @@ cfg_rt! {
 
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(_) => false,
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(_) => false,
             }
         }
 
@@ -113,6 +133,9 @@ cfg_rt! {
 
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(h) => h.timer_flavor,
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(h) => h.timer_flavor,
             }
         }
 
@@ -122,6 +145,7 @@ cfg_rt! {
             match self {
                 Handle::CurrentThread(_) => panic!("the alternative timer implementation is not supported on CurrentThread runtime"),
                 Handle::MultiThread(h) => h.is_shutdown(),
+                Handle::MultiThreadSignal(h) => h.is_shutdown(),
             }
         }
 
@@ -133,6 +157,7 @@ cfg_rt! {
             match self {
                 Handle::CurrentThread(_) => panic!("the alternative timer implementation is not supported on CurrentThread runtime"),
                 Handle::MultiThread(h) => h.push_remote_timer(entry_hdl),
+                Handle::MultiThreadSignal(h) => h.push_remote_timer(entry_hdl),
             }
         }
 
@@ -143,6 +168,9 @@ cfg_rt! {
 
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(_) => false,
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(_) => false,
             }
         }
 
@@ -156,6 +184,11 @@ cfg_rt! {
 
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(h) => multi_thread::Handle::spawn(h, future, id, spawned_at),
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(h) => {
+                    multi_thread_signal::Handle::spawn(h, future, id, spawned_at)
+                }
             }
         }
 
@@ -186,6 +219,9 @@ cfg_rt! {
 
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(ref h) => h.shutdown(),
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(ref h) => h.shutdown(),
             }
         }
 
@@ -206,6 +242,9 @@ cfg_rt! {
                 Handle::CurrentThread(h) => &h.task_hooks,
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(h) => &h.task_hooks,
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(h) => &h.task_hooks,
             }
         }
     }
@@ -216,6 +255,9 @@ cfg_rt! {
                 Handle::CurrentThread(_) => 1,
                 #[cfg(feature = "rt-multi-thread")]
                 Handle::MultiThread(handle) => handle.num_workers(),
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Handle::MultiThreadSignal(handle) => handle.num_workers(),
             }
         }
 
@@ -283,6 +325,9 @@ cfg_rt! {
                 Context::CurrentThread(_) => Some(0),
                 #[cfg(feature = "rt-multi-thread")]
                 Context::MultiThread(context) => Some(context.worker_index()),
+
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                Context::MultiThreadSignal(context) => Some(context.worker_index()),
             }
         }
 
@@ -292,6 +337,15 @@ cfg_rt! {
                 match self {
                     Context::MultiThread(context) => context,
                     _ => panic!("expected `MultiThread::Context`")
+                }
+            }
+
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            #[track_caller]
+            pub(crate) fn expect_multi_thread_signal(&self) -> &multi_thread_signal::Context {
+                match self {
+                    Context::MultiThreadSignal(context) => context,
+                    _ => panic!("expected `MultiThreadSignal::Context`")
                 }
             }
         }

@@ -14,6 +14,9 @@ use std::time::Duration;
 cfg_rt_multi_thread! {
     use crate::runtime::Builder;
     use crate::runtime::scheduler::MultiThread;
+
+    #[cfg(tokio_unstable)]
+    use crate::runtime::scheduler::MultiThreadSignal;
 }
 
 /// The Tokio runtime.
@@ -115,6 +118,15 @@ pub enum RuntimeFlavor {
     CurrentThread,
     /// The flavor that executes tasks across multiple threads.
     MultiThread,
+    /// The flavor that executes tasks across multiple threads and coordinates
+    /// its workers with a signal tree.
+    ///
+    /// This flavor is unstable. See [`Builder::new_multi_thread_signal`].
+    ///
+    /// [`Builder::new_multi_thread_signal`]: crate::runtime::Builder::new_multi_thread_signal
+    #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+    #[cfg_attr(docsrs, doc(cfg(all(tokio_unstable, feature = "rt-multi-thread"))))]
+    MultiThreadSignal,
 }
 
 /// The runtime scheduler is either a multi-thread or a current-thread executor.
@@ -126,6 +138,10 @@ pub(super) enum Scheduler {
     /// Execute tasks across multiple threads.
     #[cfg(feature = "rt-multi-thread")]
     MultiThread(MultiThread),
+
+    /// Execute tasks across multiple threads, coordinated by a signal tree.
+    #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+    MultiThreadSignal(MultiThreadSignal),
 }
 
 impl Runtime {
@@ -379,6 +395,8 @@ impl Runtime {
             Scheduler::CurrentThread(exec) => exec.block_on(&self.handle.inner, future),
             #[cfg(feature = "rt-multi-thread")]
             Scheduler::MultiThread(exec) => exec.block_on(&self.handle.inner, future),
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            Scheduler::MultiThreadSignal(exec) => exec.block_on(&self.handle.inner, future),
         }
     }
 
@@ -513,6 +531,12 @@ impl Drop for Runtime {
             }
             #[cfg(feature = "rt-multi-thread")]
             Scheduler::MultiThread(multi_thread) => {
+                // The threaded scheduler drops its tasks on its worker threads, which is
+                // already in the runtime's context.
+                multi_thread.shutdown(&self.handle.inner);
+            }
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            Scheduler::MultiThreadSignal(multi_thread) => {
                 // The threaded scheduler drops its tasks on its worker threads, which is
                 // already in the runtime's context.
                 multi_thread.shutdown(&self.handle.inner);

@@ -341,6 +341,35 @@ jobs:
         env:
           TOKIO_UNSTABLE_SHARDED_BLOCKING_QUEUE: "1"
 
+  # Run the whole test suite against the unstable signal-tree scheduler.
+  #
+  # `TOKIO_UNSTABLE_SIGNAL_SCHEDULER` changes the default flavor of
+  # `Builder::new_multi_thread`, and every multi-thread test goes through that
+  # constructor, so this job needs no test change at all.
+  test-signal-scheduler:
+    name: test tokio full with signal scheduler
+    needs: basics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust ${{ env.rust_stable }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+            toolchain: ${{ env.rust_stable }}
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - uses: Swatinem/rust-cache@v2
+      - name: test tokio full with signal scheduler
+        run: cargo nextest run --features full
+        working-directory: tokio
+        env:
+          RUSTFLAGS: --cfg tokio_unstable -Dwarnings
+          TOKIO_UNSTABLE_SIGNAL_SCHEDULER: "1"
+
   test-unstable-taskdump:
     name: test tokio full --unstable --taskdump
     needs: basics

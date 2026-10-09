@@ -463,6 +463,8 @@ impl Handle {
             scheduler::Handle::CurrentThread(_) => RuntimeFlavor::CurrentThread,
             #[cfg(feature = "rt-multi-thread")]
             scheduler::Handle::MultiThread(_) => RuntimeFlavor::MultiThread,
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            scheduler::Handle::MultiThreadSignal(_) => RuntimeFlavor::MultiThreadSignal,
         }
     }
 
@@ -485,6 +487,8 @@ impl Handle {
             scheduler::Handle::CurrentThread(handle) => handle.owned_id(),
             #[cfg(feature = "rt-multi-thread")]
             scheduler::Handle::MultiThread(handle) => handle.owned_id(),
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            scheduler::Handle::MultiThreadSignal(handle) => handle.owned_id(),
         };
         runtime::Id::new(owned_id)
     }
@@ -507,6 +511,8 @@ impl Handle {
             scheduler::Handle::CurrentThread(handle) => handle.name(),
             #[cfg(feature = "rt-multi-thread")]
             scheduler::Handle::MultiThread(handle) => handle.name(),
+            #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+            scheduler::Handle::MultiThreadSignal(handle) => handle.name(),
         }
     }
 
@@ -648,6 +654,16 @@ cfg_taskdump! {
                 scheduler::Handle::CurrentThread(handle) => handle.dump(),
                 #[cfg(all(feature = "rt-multi-thread", not(target_os = "wasi")))]
                 scheduler::Handle::MultiThread(handle) => {
+                    // perform the trace in a separate thread so that the
+                    // trace itself does not appear in the taskdump.
+                    let handle = handle.clone();
+                    spawn_thread(async {
+                        let handle = handle;
+                        handle.dump().await
+                    }).await
+                },
+                #[cfg(all(tokio_unstable, feature = "rt-multi-thread", not(target_os = "wasi")))]
+                scheduler::Handle::MultiThreadSignal(handle) => {
                     // perform the trace in a separate thread so that the
                     // trace itself does not appear in the taskdump.
                     let handle = handle.clone();

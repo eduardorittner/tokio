@@ -1,3 +1,22 @@
+# Unreleased
+
+### Added (unstable)
+
+- rt: add the `multi_thread_signal` scheduler flavor. The flavor keeps the local
+  run queues, the LIFO slot, the injection queue and the work stealing of
+  `multi_thread`. It replaces the idle-worker mutex and the random peer probe
+  with a *signal tree*: a tree of atomic words that records which work source
+  holds work and which worker sleeps. A worker that looks for work reads the
+  tree and steals from one named source. Select the flavor with
+  `Builder::new_multi_thread_signal()`.
+
+  The flavor is an experiment and is **not** production ready. The tree is an
+  array of 64-bit atomic words on every target, so a target with no 64-bit
+  atomic instruction runs the flavor correctly but slowly.
+
+  The data structure is a port of the `signal_tree` library of Michael
+  Maniscalco (<https://github.com/buildingcpp/work_contract>, MIT license).
+
 # 1.53.2 (October 3rd, 2026)
 
 ### Fixed

@@ -41,6 +41,14 @@ impl AtomicU64 {
         prev
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn fetch_and(&self, val: u64, _: Ordering) -> u64 {
+        let mut lock = self.inner.lock();
+        let prev = *lock;
+        *lock = prev & val;
+        prev
+    }
+
     pub(crate) fn compare_exchange(
         &self,
         current: u64,

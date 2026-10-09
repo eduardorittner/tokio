@@ -316,6 +316,8 @@ pub(crate) fn trace_leaf(cx: &mut task::Context<'_>) -> Poll<()> {
                     scheduler::Context::CurrentThread(s) => s.defer.defer(cx.waker()),
                     #[cfg(feature = "rt-multi-thread")]
                     scheduler::Context::MultiThread(s) => s.defer.defer(cx.waker()),
+                    #[cfg(all(tokio_unstable, feature = "rt-multi-thread"))]
+                    scheduler::Context::MultiThreadSignal(s) => s.defer.defer(cx.waker()),
                 }
             }
         });
@@ -406,11 +408,15 @@ cfg_rt_multi_thread! {
     use crate::runtime::scheduler::inject::InjectQueue;
     use crate::runtime::scheduler::multi_thread;
 
-    /// Trace and poll all tasks of the `multi_thread` runtime.
-    pub(in crate::runtime) fn trace_multi_thread(
-        owned: &OwnedTasks<Arc<multi_thread::Handle>>,
-        local: &mut multi_thread::queue::Local<Arc<multi_thread::Handle>>,
-        injection: &InjectQueue<Arc<multi_thread::Handle>>,
+    /// Trace and poll all tasks of a work-stealing multi-thread runtime.
+    ///
+    /// The helper is generic over the scheduler handle, because the
+    /// `multi_thread` and the `multi_thread_signal` flavors share the local
+    /// run queue and the injection queue.
+    pub(in crate::runtime) fn trace_multi_thread<S: Schedule>(
+        owned: &OwnedTasks<S>,
+        local: &mut multi_thread::queue::Local<S>,
+        injection: &InjectQueue<S>,
     ) -> Vec<(Id, Trace)> {
         let mut dequeued = Vec::new();
 
