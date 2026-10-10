@@ -1,4 +1,4 @@
-333
+337
 &
 +
 <
@@ -51,6 +51,7 @@ backtracing
 binded
 bitfield
 bitfields
+bitset
 Blockingly
 boolean
 broadcasted
@@ -86,6 +87,7 @@ Deallocates
 debuginfo
 decrement
 decrementing
+Dekker
 demangled
 dequeued
 dereferenced
@@ -174,6 +176,7 @@ LLVM
 lookups
 macOS
 MacOS
+Maniscalco
 Marsaglia's
 metadata
 mio
@@ -270,6 +273,7 @@ structs
 subfield
 suboptimal
 subprocess
+subtree
 superset
 symlink
 symlinks

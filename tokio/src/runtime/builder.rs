@@ -330,7 +330,7 @@ impl Builder {
         /// # Not production ready
         ///
         /// This scheduler is an experiment. Do **not** use it in production.
-        /// Its performance is not yet proven, and its behaviour can change or
+        /// Its performance is not yet proven, and its behavior can change or
         /// be removed in any release.
         ///
         /// # Target support
